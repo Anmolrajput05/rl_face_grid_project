@@ -1,11 +1,11 @@
 """
-Streamlit frontend for the RL Face Grid project
+Streamlit frontend for the RL Face Grid project with Face Recognition
 
 Place this file at the project root where `rl_face_grid/` package exists.
 
 Run:
     pip install -r requirements.txt
-    pip install streamlit
+    pip install streamlit face_recognition
     streamlit run streamlit_app.py
 
 Features:
@@ -23,9 +23,11 @@ import io
 import os
 import time
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw
 import matplotlib.pyplot as plt
 import streamlit as st
+import pickle
+from collections import OrderedDict
 
 # make sure the rl_face_grid package is importable (run from project root)
 try:
@@ -34,8 +36,10 @@ try:
     from rl_face_grid.q_learning import QLearningAgent
     from rl_face_grid.viz import plot_learning_curve, plot_path_over_image
 except Exception as e:
-    st.error("Could not import rl_face_grid package. Make sure you're running this from the project root where `rl_face_grid/` exists.")
+    st.error(
+        "Could not import rl_face_grid package. Make sure you're running this from the project root where `rl_face_grid/` exists.")
     st.stop()
+
 
 # Helpers
 @st.cache_data
@@ -49,6 +53,7 @@ def load_image_for_app(_pil_image, resize=256):
 
 def numpy_to_pil(arr):
     return Image.fromarray((arr * 255).astype(np.uint8))
+
 
 # Face recognition helpers (uses face_recognition)
 try:
@@ -87,6 +92,18 @@ def match_encoding_to_db(encoding, known_encodings, known_names, tolerance=0.5):
     return name, best_dist
 
 
+def save_known_faces(known_faces, file_path):
+    with open(file_path, 'wb') as f:
+        pickle.dump(known_faces, f)
+
+
+def load_known_faces(file_path):
+    try:
+        with open(file_path, 'rb') as f:
+            return pickle.load(f)
+    except FileNotFoundError:
+        return OrderedDict()
+
 
 # Sidebar controls
 st.sidebar.title("RL Face Grid — Controls")
@@ -99,22 +116,26 @@ targets = st.sidebar.multiselect("Targets:", options=["eyes", "nose"], default=[
 st.sidebar.markdown("---")
 episodes = st.sidebar.number_input("Episodes:", min_value=10, max_value=50000, value=2000, step=10)
 max_steps = st.sidebar.number_input("Max steps per episode:", min_value=10, max_value=2000, value=200)
-alpha = st.sidebar.number_input("Learning rate (alpha):", min_value=0.001, max_value=1.0, value=0.2, step=0.01, format="%.3f")
+alpha = st.sidebar.number_input("Learning rate (alpha):", min_value=0.001, max_value=1.0, value=0.2, step=0.01,
+                                format="%.3f")
 gamma = st.sidebar.number_input("Discount (gamma):", min_value=0.0, max_value=1.0, value=0.99, step=0.01, format="%.3f")
 eps_start = st.sidebar.number_input("Epsilon start:", min_value=0.0, max_value=1.0, value=1.0, step=0.01)
 eps_end = st.sidebar.number_input("Epsilon end:", min_value=0.0, max_value=1.0, value=0.05, step=0.01)
-eps_decay = st.sidebar.number_input("Epsilon decay:", min_value=0.8, max_value=0.9999, value=0.995, step=0.0001, format="%.4f")
+eps_decay = st.sidebar.number_input("Epsilon decay:", min_value=0.8, max_value=0.9999, value=0.995, step=0.0001,
+                                    format="%.4f")
 
 st.sidebar.markdown("---")
 step_cost = st.sidebar.number_input("Step cost:", min_value=0.0, max_value=1.0, value=0.01, step=0.001, format="%.3f")
-distance_weight = st.sidebar.number_input("Distance shaping weight:", min_value=0.0, max_value=1.0, value=0.1, step=0.01, format="%.3f")
+distance_weight = st.sidebar.number_input("Distance shaping weight:", min_value=0.0, max_value=1.0, value=0.1,
+                                          step=0.01, format="%.3f")
 
 out_dir = st.sidebar.text_input("Output folder:", value="out")
 if not os.path.exists(out_dir):
     os.makedirs(out_dir, exist_ok=True)
 
 st.title("Reinforcement Learning — Face Grid (Streamlit Frontend)")
-st.markdown("Small demo that trains a tabular Q-learning agent to navigate a grid over a face image and find facial parts (eyes/nose). Uses the project's `rl_face_grid` package.")
+st.markdown(
+    "Small demo that trains a tabular Q-learning agent to navigate a grid over a face image and find facial parts (eyes/nose). Uses the project's `rl_face_grid` package.")
 
 # Load selected image
 sample_img_path = os.path.join("data", "sample_face.png")
@@ -213,7 +234,7 @@ if train_button:
         # update progress
         progress_bar.progress((ep + 1) / max(1, episodes))
         if (ep + 1) % save_every == 0 or ep == episodes - 1:
-            status.text(f"Episode {ep+1}/{episodes}  Return={total_r:.3f}  Epsilon={agent.epsilon:.3f}")
+            status.text(f"Episode {ep + 1}/{episodes}  Return={total_r:.3f}  Epsilon={agent.epsilon:.3f}")
             # save q-table and learning curve
             np.save(q_path, agent.Q)
             # save learning curve image
@@ -228,7 +249,6 @@ if train_button:
     if os.path.exists(os.path.join(out_dir, "learning_curve.png")):
         st.image(os.path.join(out_dir, "learning_curve.png"), caption="Learning curve")
 
-
 # Evaluation (greedy)
 if eval_button:
     # choose Q: uploaded -> loaded file -> existing on disk -> prompt to train
@@ -240,7 +260,8 @@ if eval_button:
         st.error("No Q-table available. Train first or upload a q_table.npy.")
         st.stop()
 
-    env = FaceGridEnv(img_arr, grid_size=grid_size, targets=tuple(targets), max_steps=int(max_steps), step_cost=float(step_cost), distance_weight=float(distance_weight))
+    env = FaceGridEnv(img_arr, grid_size=grid_size, targets=tuple(targets), max_steps=int(max_steps),
+                      step_cost=float(step_cost), distance_weight=float(distance_weight))
 
     # greedy rollout
     s = env.reset()
@@ -259,7 +280,6 @@ if eval_button:
     img_overlay = draw_path_on_image(img_arr, grid_coords, path)
     # mark target
     tr, tc = env.target_r, env.target_c
-    from PIL import ImageDraw
     draw = ImageDraw.Draw(img_overlay)
     y0, x0, y1, x1 = grid_coords[tr, tc]
     draw.rectangle([x0, y0, x1, y1], outline=128, width=3)
@@ -272,17 +292,89 @@ if eval_button:
     st.image(buf)
     st.write(f"Target cell: (row={tr}, col={tc}), steps={steps}")
 
-# Quick tips and downloads
+# Face Recognition Section
 st.markdown("---")
-st.subheader("Run notes & downloads")
-st.write("To run this app from the project root: `streamlit run streamlit_app.py`. Ensure `rl_face_grid` package is present (the project files).`")
+st.subheader("Face Recognition")
 
-if os.path.exists(q_path):
-    with open(q_path, "rb") as f:
-        st.download_button("Download q_table.npy", f, file_name="q_table.npy")
+known_faces_file = os.path.join(out_dir, "known_faces.pkl")
+known_faces = load_known_faces(known_faces_file)
 
-if os.path.exists(os.path.join(out_dir, "learning_curve.png")):
-    with open(os.path.join(out_dir, "learning_curve.png"), "rb") as f:
-        st.download_button("Download learning curve", f, file_name="learning_curve.png")
+# Enroll new face
+st.write("Enroll a new face:")
+new_face_name = st.text_input("Name for the new face:")
+new_face_image = st.file_uploader("Upload an image of the person:", type=["jpg", "jpeg", "png"])
 
-st.caption("Live camera uses Streamlit's camera_input. For continuous real-time tracking you'd need a more complex loop or WebRTC integration.")
+if new_face_name and new_face_image:
+    new_face_pil = Image.open(new_face_image)
+    new_face_encoding = encode_face_from_pil(new_face_pil)
+
+    if new_face_encoding:
+        known_faces[new_face_name] = new_face_encoding[0]
+        save_known_faces(known_faces, known_faces_file)
+        st.success(f"Enrolled {new_face_name} successfully!")
+    else:
+        st.error("No face detected in the uploaded image. Please try another image.")
+
+# Display enrolled faces
+st.write("Enrolled Faces:")
+for name in known_faces.keys():
+    st.write(f"- {name}")
+
+# Face Recognition on current image
+if image_pil is not None:
+    st.write("Performing face recognition on the current image:")
+    face_locations = find_faces_in_pil(image_pil)
+
+    if face_locations:
+        face_encodings = encode_face_from_pil(image_pil)
+
+        for (top, right, bottom, left), face_encoding in zip(face_locations, face_encodings):
+            name, distance = match_encoding_to_db(face_encoding, list(known_faces.values()), list(known_faces.keys()))
+
+            # Draw rectangle and name
+            draw = ImageDraw.Draw(image_pil)
+            draw.rectangle([(left, top), (right, bottom)], outline="red", width=2)
+
+            if name:
+                text = f"{name} ({distance:.2f})"
+            else:
+                text = "Unknown"
+
+            # Draw text background
+            text_width, text_height = draw.textsize(text)
+            draw.rectangle([(left, bottom - text_height - 10), (right, bottom)], fill="red")
+
+            # Draw text
+            draw.text((left + 6, bottom - text_height - 5), text, fill="white")
+
+            # Display the image with face recognition results
+        st.image(image_pil, caption="Face Recognition Results", use_column_width=True)
+
+        # Display recognized names
+        st.write("Recognized faces:")
+        for (top, right, bottom, left), face_encoding in zip(face_locations, face_encodings):
+            name, distance = match_encoding_to_db(face_encoding, list(known_faces.values()), list(known_faces.keys()))
+            if name:
+                st.write(f"- {name} (confidence: {1 - distance:.2f})")
+            else:
+                st.write("- Unknown face detected")
+
+    else:
+        st.write("No faces detected in the current image.")
+
+    # Add a button to clear all enrolled faces
+    if st.button("Clear All Enrolled Faces"):
+        known_faces.clear()
+        save_known_faces(known_faces, known_faces_file)
+        st.success("All enrolled faces have been cleared.")
+        st.experimental_rerun()
+
+    # Instructions for using the face recognition feature
+    st.markdown("""
+            ## How to use Face Recognition:
+            1. Enroll faces by providing a name and uploading an image.
+            2. Use the image source options (Sample image, Upload image, or Live camera) to select an image for recognition.
+            3. The app will detect faces in the image and try to match them with enrolled faces.
+            4. Recognized faces will be outlined in red with names (if matched) or "Unknown" labels.
+            5. Use the "Clear All Enrolled Faces" button to reset the face database.
+            """)
