@@ -2,4 +2,3 @@ streamlit
 numpy
 matplotlib
 Pillow
-face_recognition
